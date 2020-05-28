@@ -1,0 +1,259 @@
+---
+title: "2019 Foreign Assistance Funds Spent in the CWMD Sector"
+author: "J. Dayton"
+date: "28 May 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+### Source of data and information:  
+
+<http://foreignassistance.gov/>
+
+## Financial Data
+
+Financial data includes both:  
+(Source: <https://www.foreignassistance.gov/learn/understanding-the-data>)
+
+* _obligated data_ – funds the U.S. government decides can be mobilized 
+* _spent data_ – funds the U.S. government has mobilized to purchase goods and services. 
+
+U.S. government agencies report financial transaction data to ForeignAssistance.gov from their accounting systems on a quarterly basis. The fiscal years associated with obligated and spent transaction data on ForeignAssistance.gov represent the years in which those transactions took place. Transaction data is the most granular form of financial data. Transaction data represents every individual financial record in an agency’s accounting system for program work with implementing partners and administrative expenses.
+
+#### Obligated
+Obligated data represents the funds that U.S. government agencies commit to spend on foreign assistance efforts. Agencies take their appropriated funds and commit them to specific projects or activities.
+
+Obligations are also known as commitments because they are the funds which have been applied to activities that obligate/commit the U.S. government to make outlays either immediately or in the future for those given activities. Funds can be de-obligated, in which case they would appear as negative values in our dataset.
+
+#### Spent
+Spent data represents funds the U.S. government has outlaid, disbursed, or expended to purchase goods and services during a given quarter of a fiscal year.
+
+* **_Disbursements:_**  Disbursements are the funds paid/outlaid by U.S. government agencies, by cash or cash equivalent, during the fiscal year to liquidate government obligations.
+
+* **_Expenditures:_**  Expenditures are the actual disbursement of funds in return for goods and services.
+
+This exercise focuses on dollars ($) spent by disbursement or expenditure in 2019.
+
+```{r lib, include=FALSE, warning=FALSE}
+# library(classInt)
+library(dplyr)
+library(kableExtra)
+library(knitr)
+library(htmltools)
+library(leaflet)
+library(RColorBrewer)
+# library(rworldmap)
+
+source("custFunc.R")
+```
+```{r loadData, echo=FALSE}
+data <- read.csv(paste0("./ForeignAssistance-FullDataSet/ForeignAssistance-FullDataSet-2018-and-Later.csv"), stringsAsFactors = FALSE)
+## FOR FY19
+dfAll <- subset(data, Transaction...Fiscal.Year == 2019) 
+rm(data)  #Save memory - no further calls to this original data element
+
+## FOR Disbursement and Expenditure
+dfAll <- subset(dfAll, Transaction...Type %in% c("Disbursement", "Expenditure"))
+
+## For CWMD
+dfAll <- subset(dfAll, Transaction...U.S..Foreign.Assistance.Sector.Name == "Combating Weapons of Mass Destruction (WMD)")
+```
+
+## Example Data Table
+
+```{r dataTableSelect, echo=FALSE}
+# print(paste0("The dimensions of the consolidated data are ", dim(dfAll), "."))
+dTable <- kable(head(data.frame(Department = dfAll[, 3], Agency = dfAll[, 4], 
+                      Location = dfAll[, 13], Value = dfAll[, 21], FY = dfAll[, 23], 
+                      TransType = dfAll[, 25], 
+                      TreasAcctTitle = dfAll[, 36]))) %>%
+   kable_styling(latex_options = c("striped", "scale_down"))
+dTable
+```
+
+## 2019 CWMD Sector Foreign Assistance - United States Government (USG)
+
+```{r mgmtAgency, echo=FALSE}
+USGTab1 <- kable(data.frame("USG managing agencies for 2019 CWMD Sector Foreign Assistance:" = unique(dfAll$Managing.Agency))) %>%
+kable_styling(latex_options = c("striped", "scale_down"))
+
+USGTab2 <- kable(data.frame("Treasury account titles for 2019 CWMD Sector Foreign Assistance:" = unique(dfAll$Treasury.Account...Title))) %>%
+kable_styling(latex_options = c("striped", "scale_down"))
+```
+```{r aggData, echo=FALSE}
+## For USG
+dfUSG <- dfAll %>%
+  group_by(Location = Award...Benefitting.Location) %>%
+  summarise(Amount = sum(Transaction...Value), Initiatives = n()) 
+
+## For DoD
+dfDoD <- subset(dfAll, Managing.Agency == "U.S. Department of Defense")
+rm(dfAll)
+```
+```{r DoDTabCreate, echo=FALSE}
+DoDTab1 <- kable(data.frame("DoD managing agencies for 2019 CWMD Sector Foreign Assistance:" = unique(dfDoD$Managing.Agency...Office))) %>%
+kable_styling(latex_options = c("striped", "scale_down"))
+
+DoDTab2 <- kable(data.frame("DoDTreasury account titles for 2019 CWMD Sector Foreign Assistance:" = unique(dfDoD$Treasury.Account...Title))) %>%
+kable_styling(latex_options = c("striped", "scale_down"))
+```
+```{r aggData2, echo=FALSE}
+dfDoD <- dfDoD %>%
+  group_by(Location = Award...Benefitting.Location) %>%
+  summarise(Amount = sum(Transaction...Value), Initiatives = n())
+
+region <- c("Africa (South of Sahara)", "America (North & Central America)", "America (South America)", "Asia (Far East Asia)", "Asia (Middle East Asia)", "Asia (South & Central Asia)", "Europe", "Oceania", "Worldwide")
+
+#Track areas not included in map
+dfUSGRegion <- removeRegion(df = dfUSG, sort.col = dfUSG$Location, val = FALSE)
+
+dfUSGRegion$Amount <- round((dfUSGRegion$Amount/1000000), 2)
+USGRegionTab <- kable(dfUSGRegion) %>%
+kable_styling(latex_options = c("striped", "scale_down"))
+
+#Take out regional reference
+dfUSG <- removeRegion(df = dfUSG, sort.col = dfUSG$Location)
+#Track areas not included in map
+dfDoDRegion <- removeRegion(df = dfDoD, sort.col = dfDoD$Location, val = FALSE)
+
+dfDoDRegion$Amount <- round((dfDoDRegion$Amount/1000000), 2)
+DoDRegionTab <- kable(dfDoDRegion) %>%
+kable_styling(latex_options = c("striped", "scale_down"))
+
+#Take out regional reference
+dfDoD <- removeRegion(df = dfDoD, sort.col = dfDoD$Location)
+```
+```{r MergeData, eval=TRUE, echo=FALSE, include=FALSE, warning=FALSE}
+#Get the country data
+data("countryExData", envir = environment(), package = "rworldmap")
+dfMergeUSG <- rworldmap::joinCountryData2Map(dfUSG, joinCode = "NAME", 
+                                  nameJoinColumn = "Location", verbose = "TRUE")
+#Removes Antarctica - Not applicable, aids in mapping and reduces map size
+dfMergeUSG <- subset(dfMergeUSG, continent != "Antarctica")
+
+#Take care of NA values
+#Scale Amount to $M
+dfMergeUSG$Amount <- dfMergeUSG$Amount / 1000000
+
+#Get country data
+dfMergeDOD <- rworldmap::joinCountryData2Map(dfDoD, joinCode = "NAME", 
+                                  nameJoinColumn = "Location", verbose = "TRUE")
+#Removes Antarctica - Not applicable, aids in mapping and reduces map size
+dfMergeDOD <- subset(dfMergeDOD, continent != "Antarctica")
+#Scale Amount to $M
+dfMergeDOD$Amount <- dfMergeDOD$Amount / 1000000
+```
+```{r USGmapSetup, echo=FALSE, warning=FALSE}
+#getting class intervals
+classInt <- classInt::classIntervals(dfMergeUSG[["Amount"]], n = 7, style = "jenks")
+catMethod <- classInt[["brks"]]
+pal <- colorBin("Greens", domain = dfMergeUSG$Amount, bins = catMethod)
+
+#setting labels
+labs <- lapply(seq(nrow(dfMergeUSG)), function(i) {
+   paste0( '<p><b>', dfMergeUSG$Location[i], "</b><br>",
+           '<b>Initiatives: </b>', dfMergeUSG$Initiatives[i], "<br>",
+           '<b>Amount:</b> $', round(dfMergeUSG$Amount[i],2),"M",
+           '</p>' )
+   } )
+```
+```{r USGMapBuild, eval=TRUE, echo=FALSE, include=FALSE, warning=FALSE}
+#plot map
+USGmap1 <- dfMergeUSG %>%
+  leaflet() %>%
+  addTiles() %>%
+  # fitBounds(lng1 = -178, lat1 = -54, lng2 = 179.5, lat2 = 75) %>%
+  setView(lng = 0, lat = 40, zoom = 1) %>%
+  addPolygons(fillColor = ~pal(Amount), weight = 1, opacity = 1, 
+              color = "black", fillOpacity = 0.7,
+              highlightOptions = list(weight = 3, color = "darkgray",
+                                           fillOpacity = 0.7,
+                                           bringToFront = TRUE),
+              label = lapply(labs, htmltools::HTML),
+              labelOptions = list(style = list("font-weight" = "normal", padding = "3px 8px"),
+                   textsize = "15px", direction = "auto")) %>%
+  addLegend(position = "bottomright", pal = pal, values = ~Amount, 
+            labFormat = labelFormat(digits = 1),
+            title = "Amount ($M)") %>%
+  addControl("<b>2019 USG Foreign Assistance Funds Spent in CWMD Sector</b>", 
+             position = "bottomleft")
+```
+
+### 2019 Foreign Assistance Funding in the CWMD Sector - USG Departments:
+```{r USGTab1, echo=FALSE}
+USGTab1
+```
+
+### 2019 Foreign Assistance Funding in the CWMD Sector - USG Treasury Accounts:
+```{r USGTab2, echo=FALSE}
+USGTab2
+```
+
+### 2019 USG Foreign Assistance Funding in the CWMD Sector Spending Map (Country Specific):
+```{r USGMap, echo=FALSE, warning=FALSE}
+USGmap1
+```
+
+#### 2019 USG Foreign Assistance in the CWMD Sector Funding NOT on Map:
+```{r USGNotMap, echo=FALSE}
+USGRegionTab
+```
+
+## 2019 CWMD Sector Foreign Assistance - Department of Defense (DOD)
+
+```{r DODmapSetup, echo=FALSE, warning=FALSE}
+#getting class intervals
+classInt <- classInt::classIntervals(dfMergeDOD[["Amount"]], n = 7, style = "jenks")
+catMethod <- classInt[["brks"]]
+pal <- colorBin("Purples", domain = dfMergeDOD$Amount, bins = catMethod)
+
+#setting labels
+labs <- lapply(seq(nrow(dfMergeDOD)), function(i) {
+   paste0( '<p><b>', dfMergeDOD$Location[i], "</b><br>",
+           '<b>Initiatives: </b>', dfMergeDOD$Initiatives[i], "<br>",
+           '<b>Amount:</b> $', round(dfMergeDOD$Amount[i],2),"M",
+           '</p>' )
+   } )
+```
+```{r DODMapBuild, eval=TRUE, echo=FALSE, include=FALSE, warning=FALSE}
+#plot map
+DODmap1 <- dfMergeDOD %>%
+  leaflet() %>%
+  addTiles() %>%
+  setView(lng = 60, lat = 25, zoom = 2) %>%
+  addPolygons(fillColor = ~pal(Amount), weight = 1, opacity = 1,
+              color = "black", fillOpacity = 0.7,
+              highlightOptions = list(weight = 3, color = "darkgray",
+                                           fillOpacity = 0.7,
+                                           bringToFront = TRUE),
+              label = lapply(labs, htmltools::HTML),
+              labelOptions = list(style = list("font-weight" = "normal", padding = "3px 8px"),
+                   textsize = "15px", direction = "auto")) %>%
+  addLegend(position = "bottomright", pal = pal, values = ~Amount,
+            labFormat = labelFormat(digits = 1),
+            title = "Amount ($M)") %>%
+  addControl("<b>2019 DOD Foreign Assistance Funds Spent in CWMD Sector</b>",
+             position = "bottomleft")
+```
+
+### 2019 Foreign Assistance Funding in the CWMD Sector - DOD Managing Agencies:
+```{r DODTab1, echo=FALSE}
+DoDTab1
+```
+
+### 2019 DOD Foreign Assistance Funding in the CWMD Sector - Treasury Accounts:
+```{r DODTab2, echo=FALSE}
+DoDTab2
+```
+
+### 2019 DOD Foreign Assistance Funding in the CWMD Sector Spending Map (Country Specific):
+```{r DODMap, echo=FALSE, warning=FALSE}
+DODmap1
+```
+
+#### 2019 USG Foreign Assistance in the CWMD Sector Funding NOT on Map:
+```{r DODNotMap, echo=FALSE}
+DoDRegionTab
+```
