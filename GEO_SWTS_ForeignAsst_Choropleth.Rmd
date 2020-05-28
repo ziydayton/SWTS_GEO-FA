@@ -1,0 +1,225 @@
+---
+title: "Foreign Assistance Choropleth Map"
+author: "J. Dayton"
+date: "5/19/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Financial Data
+
+
+Financial data includes both: 
+(Source: <https://www.foreignassistance.gov/learn/understanding-the-data>)
+
+* obligated data – funds the U.S. government decides can be mobilized 
+* spent data – funds the U.S. government has mobilized to purchase goods and services. 
+
+U.S. government agencies report financial transaction data to ForeignAssistance.gov from their accounting systems on a quarterly basis. The fiscal years associated with obligated and spent transaction data on ForeignAssistance.gov represent the years in which those transactions took place. Transaction data is the most granular form of financial data. Transaction data represents every individual financial record in an agency’s accounting system for program work with implementing partners and administrative expenses.
+
+### Obligated
+Obligated data represents the funds that U.S. government agencies commit to spend on foreign assistance efforts. Agencies take their appropriated funds and commit them to specific projects or activities.
+
+Obligations are also known as commitments because they are the funds which have been applied to activities that obligate/commit the U.S. government to make outlays either immediately or in the future for those given activities. Funds can be de-obligated, in which case they would appear as negative values in our dataset.
+
+### Spent
+Spent data represents funds the U.S. government has outlaid, disbursed, or expended to purchase goods and services during a given quarter of a fiscal year.
+
+#### Disbursements
+Disbursements are the funds paid/outlaid by U.S. government agencies, by cash or cash equivalent, during the fiscal year to liquidate government obligations.
+
+#### Expenditures
+Expenditures are the actual disbursement of funds in return for goods and services.
+
+## STEP 0: Load Libraries
+
+```{r lib, include=FALSE, warning=FALSE}
+library(classInt)
+library(dplyr)
+library(kableExtra)
+library(knitr)
+library(RColorBrewer)
+library(rworldmap)
+
+source("custFunc.R")
+```
+
+### Data source:  
+
+<http://foreignassistance.gov/>
+
+### General Methodology / Outline
+There are four general steps to creating these charts:
+
+* 1. Import libraries and relevant data set.
+* 2. Aggregate data by country (or other location).
+* 3. Merge data from data set to map data.
+* 4. Create the plot in ggplot2.
+
+## STEP 1: Import relevant data set.
+
+### Get the Foreign Assistance Data
+
+The Foreign Assistance data is from <https://www.foreignassistance.gov/developers>.
+The Foreign Assistance files were downloaded in .csv for FY19 - the focus of this example.
+
+```{r loadData}
+data <- read.csv(paste0("./ForeignAssistance-FullDataSet/ForeignAssistance-FullDataSet-2018-and-Later.csv"), stringsAsFactors = FALSE)
+## FOR FY19
+dfAll <- subset(data, Transaction...Fiscal.Year == 2019) 
+rm(data)  #Save memory - no further calls to this original data element
+
+## FOR Disbursement and Expenditure
+dfAll <- subset(dfAll, Transaction...Type %in% c("Disbursement", "Expenditure"))
+
+## For CWMD
+dfAll <- subset(dfAll, Transaction...U.S..Foreign.Assistance.Sector.Name == "Combating Weapons of Mass Destruction (WMD)")
+unique(dfAll$Managing.Agency)
+unique(dfAll$Treasury.Account...Title)
+```
+
+```{r dataTableSelect}
+print(paste0("The dimensions of the consolidated data are ", dim(dfAll), "."))
+kable(head(data.frame(Department = dfAll[, 3], Agency = dfAll[, 4], Location = dfAll[, 13], Value = dfAll[, 21], FY = dfAll[, 23], TransType = dfAll[, 25], TreasAcctTitle = dfAll[, 36]))) %>%
+kable_styling(latex_options = c("striped", "scale_down"))
+```
+
+## STEP 2. Aggregate data by country (or other location).
+
+```{r aggData}
+## For USG
+dfUSG <- dfAll %>%
+  group_by(Location = Award...Benefitting.Location) %>%
+  summarise(Amount = sum(Transaction...Value), Initiatives = n()) 
+
+## For DoD
+dfDoD <- subset(dfAll, Managing.Agency == "U.S. Department of Defense")
+unique(dfDoD$Managing.Agency...Office)
+unique(dfDoD$Treasury.Account...Title)
+
+dfDoD <- dfDoD %>%
+  group_by(Location = Award...Benefitting.Location) %>%
+  summarise(Amount = sum(Transaction...Value), Initiatives = n())
+
+region <- c("Africa (South of Sahara)", "America (North & Central America)", "America (South America)", "Asia (Far East Asia)", "Asia (Middle East Asia)", "Asia (South & Central Asia)", "Europe", "Oceania", "Worldwide")
+
+#Track areas not included in map
+dfUSGRegion <- removeRegion(df = dfUSG, sort.col = dfUSG$Location, val = FALSE)
+#Take out regional reference
+dfUSG <- removeRegion(df = dfUSG, sort.col = dfUSG$Location)
+#Track areas not included in map
+dfDoDRegion <- removeRegion(df = dfDoD, sort.col = dfDoD$Location, val = FALSE)
+#Take out regional reference
+dfDoD <- removeRegion(df = dfDoD, sort.col = dfDoD$Location)
+```
+
+## STEP 3. Merge data from data set to map data.
+
+```{r MergeData}
+#Get the country data
+data("countryExData", envir = environment(), package = "rworldmap")
+dfMergeUSG <- joinCountryData2Map(dfUSG, joinCode = "NAME", 
+                                  nameJoinColumn = "Location", verbose = "TRUE")
+#Take care of NA values
+# dfMergeUSG$Amount[is.na(dfMergeUSG[["Amount"]])] <- 0
+#Scale Amount to $M
+dfMergeUSG$Amount <- dfMergeUSG$Amount / 1000000
+
+#Get country data
+dfMergeDOD <- joinCountryData2Map(dfDoD, joinCode = "NAME", 
+                                  nameJoinColumn = "Location", verbose = "TRUE")
+#Take care of NA values
+# dfMergeDOD$Amount[is.na(dfMergeDOD[["Amount"]])] <- 0
+#Scale Amount to $M
+dfMergeDOD$Amount <- dfMergeDOD$Amount / 1000000
+```
+
+## STEP 4. Create the plot(s).
+```{r Plot1}
+mapDevice() #create world map shaped window
+mapCountryData(dfMergeUSG, nameColumnToPlot = "Amount")
+
+
+```
+
+```{r plot2, warning=FALSE}
+
+#getting class intervals
+classInt <- classIntervals(dfMergeUSG[["Amount"]], n = 7, style = "jenks")
+catMethod = classInt[["brks"]]
+
+#getting colours
+colourPalette <- brewer.pal(7, "Greens")
+
+#plot map
+mapDevice() #create world map shaped window
+mapParams <- mapCountryData(dfMergeUSG, nameColumnToPlot = "Amount",
+                            addLegend = FALSE, catMethod = catMethod,
+                             mapTitle = "US Government FY19 Foreign Assistance - CWMD Sector ($M)",
+                            colourPalette = colourPalette, oceanCol = "white",
+                            missingCountryCol = "grey98",
+                            borderCol = "grey10")
+#adding legend
+do.call(addMapLegend , c(mapParams, legendLabels = "all", legendWidth = 0.5,
+                         legendIntervals = "data",
+                         legendMar = 2))
+```
+
+```{r missUSGtable}
+dfUSGRegion <- dfUSGRegion %>% arrange(desc(Amount)) %>% 
+   mutate(Amount = round(Amount / 1000000, 2)) %>%
+   select(Location, Initiatives, Amount)
+colnames(dfUSGRegion) <- c("Region", "Initiatives", "Amount ($M)")
+kable(dfUSGRegion)
+```
+
+```{r plotDoD, warning=FALSE}
+#getting class intervals
+classInt <- classIntervals(dfMergeDOD[["Amount"]], n = 7, style = "jenks")
+catMethod = classInt[["brks"]]
+
+#getting colours
+colourPalette <- brewer.pal(7, "BuPu")
+
+#plot map
+mapDevice() #create world map shaped window
+mapParams <- mapCountryData(dfMergeDOD, nameColumnToPlot = "Amount",
+                            addLegend = FALSE, catMethod = catMethod,
+                             mapTitle = "Department of Defense FY19 Foreign Assistance - CWMD Sector ($M)",
+                            colourPalette = colourPalette, oceanCol = "white",
+                            missingCountryCol = "grey99",
+                            borderCol = "grey10")
+#adding legend
+do.call(addMapLegend , c(mapParams, legendLabels = "all", legendWidth = 0.5,
+                         legendIntervals = "data",
+                         legendMar = 2))
+```
+
+```{r plotDoD2, warning=FALSE}
+#plot map
+mapDevice() #create world map shaped window
+mapParams <- mapCountryData(dfMergeDOD, nameColumnToPlot = "Amount",
+                            addLegend = FALSE, catMethod = catMethod,
+                             mapTitle = "Department of Defense FY19 Foreign Assistance - CWMD Sector ($M)",
+                            colourPalette = colourPalette, oceanCol = "white",
+                            missingCountryCol = "grey99",
+                            borderCol = "grey10",
+                            xlim = c(85, 100), 
+                            ylim = c(-60, 90))
+#adding legend
+do.call(addMapLegend , c(mapParams, legendLabels = "all", legendWidth = 0.5,
+                         legendIntervals = "data",
+                         legendMar = 2))
+```
+
+```{r missDoDtable}
+dfDoDRegion <- dfDoDRegion %>% arrange(desc(Amount)) %>% 
+   mutate(Amount = round(Amount / 1000000, 2)) %>%
+   select(Location, Initiatives, Amount)
+colnames(dfDoDRegion) <- c("Region", "Initiatives", "Amount ($M)")
+kable(dfDoDRegion)
+```

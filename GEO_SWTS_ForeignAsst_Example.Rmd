@@ -1,0 +1,139 @@
+---
+title: "GEO_Code - Foreign Assistance Example"
+author: "J. Dayton"
+date: "5/13/2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+always_allow_html: yes
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(countrycode)
+library(dplyr)
+# suppressPackageStartupMessages(library(googleVis))
+library(plotly)
+library(httr)
+library(jsonlite)
+library(knitr)
+library(tinytex)
+library(webshot)
+
+source("custFunc.R")
+```
+
+## Get the Activity Data
+
+The Foreign Assistance data is from <https://www.foreignassistance.gov/developers>.
+This section takes ~30 minutes (+/- 10 minutes).  Process time output to provide feedback that operation remains in execution.
+
+```{r getData, include = FALSE, warning=FALSE}
+##Pick what "Activities" we want to get and set the URL
+fundingTypeSel <- c("obligated", "spent") #Activity type
+agencySel <- c("African%20Development%20Foundation", "Environmental%20Protection%20Agency", "Federal%20Trade%20Commission", "Inter-American%20Foundation", "Millennium%20Challenge%20Corporation", "Overseas%20Private%20Investment%20Corporation", "Peace%20Corps", "U.S.%20Agency%20for%20International%20Development", "Department%20of%20Agriculture", "Department%20of%20Commerce", "Department%20of%20Defense", "Department%20f%20Energy", "Department%20of%20Health%20and%20Human%20Services", "Department%20of%20Homeland%20Security", "Department%20of%20the%20Interior", "Department%20of%20Justice", "Department%20of%20Labor", "Department%20of%20State", "Department%20of%20Transportation", "Department%20of%20the%20Treasury", "Trade%20and%20Development%20Agency", "Export-Import%20Bank", "Department%20of%20the%20Air%20Force", "Department%20of%20the%20Army",  "Department%20of%20the%20Navy", "National%20Science%20Foundation", "Open%20World%20Leadership%20Center", "United%20States%20Institute%20of%20Peace", "Unknown%20-%20Historical%20Greenbook")
+yearSel <- as.character(c(2015:2021)) #For years 2015:2021
+
+dfActivity <- getFAActivities(fundingType = fundingTypeSel, agency = agencySel, 
+                              year = yearSel)
+dfActivity$cCode <- countrycode(dfActivity$benefitingLocation, origin = "country.name", destination = "genc3c")
+```
+
+## Get Planned (Activity) Data
+
+The Foreign Assistance data is from <https://www.foreignassistance.gov/developers>.
+This section takes ~30 minutes (+/- 10 minutes).  Process time output to provide feedback that operation remains in execution.
+
+```{r planAct, include=FALSE, warning=FALSE }
+##Pick what "Planned" we want to get and set the URL
+
+
+# "https://fagov-apim-prd.azure-api.us/public/api/public/planned?format=json&fundingType=appropriated&filterType=agency&filterValue=Department%20Of%20Defense&year=2013"
+
+##Pick what "Activities" we want to get and set the URL
+fundingTypeSel <- c("requested", "appropriated", "actual") #Planned type
+
+
+dfPlanned <- getFAPlanned(fundingType = fundingTypeSel, agency = agencySel, 
+                          year = yearSel) 
+dfPlanned$cCode <- countrycode(dfPlanned$benefitingLocation, origin = "country.name", destination = "genc3c")
+```
+
+## Create Plot
+
+Plot created for the 2019 Foreign Assistance Planned activites where US dollars were spent in support of the CWMD sector.
+``` {r pltlyPlot, echo=FALSE, results = "asis"}
+#Set df to plot
+tempYear <- 2019
+tempFundingType <- "spent" #c("obligated", "spent")
+tempSector <- "Combating Weapons of Mass Destruction (WMD)"
+
+dfTemp <- dfActivity[dfActivity$year == tempYear, ]
+dfTemp <- dfTemp[dfTemp$fundingType == tempFundingType, ]
+dfTemp <- dfTemp[dfTemp$sector == tempSector, ]
+dfTemp$amount <- round(dfTemp$amount / 1000000, 2)
+
+# light grey boundaries
+l <- list(color = toRGB("grey"), width = 0.5)
+# specify map projection/options
+g <- list(
+  showframe = TRUE,
+  showcoastlines = TRUE,
+  projection = list(type = 'Mercator')
+)
+
+fig <- plot_geo(dfTemp) %>%
+   add_trace(z = ~amount, color = ~amount, colors = 'Blues',
+    text = ~benefitingLocation, locations = ~cCode,
+    marker = list(line = l)) %>%
+   colorbar(title = '$M (US)', tickprefix = '$') %>%
+   layout(title = "TITLE", geo = g)
+
+fig
+```
+
+
+``` {r pltlyPlot, echo=FALSE, results = "asis"}
+#Set df to plot
+tempYear <- 2019
+tempFundingType <- "spent" #c("obligated", "spent")
+tempSector <- "Combating Weapons of Mass Destruction (WMD)"
+
+dfTemp <- dfActivity[dfActivity$year == tempYear, ]
+dfTemp <- dfTemp[dfTemp$fundingType == tempFundingType, ]
+dfTemp <- dfTemp[dfTemp$sector == tempSector, ]
+dfTemp$amount <- round(dfTemp$amount / 1000000, 2)
+
+# light grey boundaries
+l <- list(color = toRGB("grey"), width = 0.5)
+# specify map projection/options
+g <- list(
+  showframe = TRUE,
+  showcoastlines = TRUE,
+  projection = list(type = 'Mercator')
+)
+
+fig <- plot_geo(dfTemp) %>%
+   add_trace(z = ~amount, color = ~amount, colors = 'Blues',
+    text = ~benefitingLocation, locations = ~cCode,
+    marker = list(line = l)) %>%
+   colorbar(title = '$M (US)', tickprefix = '$') %>%
+   layout(title = "TITLE", geo = g)
+
+fig
+```
+
+### Export Method
+
+```{r}
+# tmpFile <- tempfile(fileext = ".png")
+# export(fig, file = tmpFile)
+
+#In body:
+# ![Caption for the picture.](`r tmpFile`)
+```
+
+
+
